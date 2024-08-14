@@ -28,11 +28,11 @@ change_default_shell_to_zsh
 
 # Define repositories to clone
 repos=(
-  "https://kkgithub.com/zsh-users/zsh-syntax-highlighting.git"
-  "https://kkgithub.com/zsh-users/zsh-autosuggestions.git"
-  "https://kkgithub.com/agkozak/zsh-z.git"
-  "https://kkgithub.com/marlonrichert/zsh-autocomplete.git"
-  "https://kkgithub.com/romkatv/powerlevel10k.git"
+  "https://gitdl.cn/https://github.com/zsh-users/zsh-syntax-highlighting.git"
+  "https://gitdl.cn/https://github.com/zsh-users/zsh-autosuggestions.git"
+  "https://gitdl.cn/https://github.com/agkozak/zsh-z.git"
+  "https://gitdl.cn/https://github.com/marlonrichert/zsh-autocomplete.git"
+  "https://gitdl.cn/https://github.com/romkatv/powerlevel10k.git"
 )
 
 # Create ~/.terminal directory if it doesn't exist
