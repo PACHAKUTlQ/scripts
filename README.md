@@ -1,2 +1,2 @@
-# WinScripts
-useful scripts on windows
+# Scripts
+useful shell and batch scripts
