@@ -8,8 +8,8 @@ RED="\e[31m"
 GREEN="\e[32m"
 END="\e[0m"
 
-echo -e "${RED}Setting proxy to 127.0.0.1:1080${END}"
-PROXY="socks5://127.0.0.1:1080"
+echo -e "${RED}Setting proxy to 127.0.0.1:10800${END}"
+PROXY="socks5://127.0.0.1:10800"
 export all_proxy="$PROXY"
 export http_proxy="$PROXY"
 export https_proxy="$PROXY"
@@ -79,55 +79,60 @@ update_aide_db() {
 
   echo "Initializing AIDE audit..."
 
-  # 1. Run AIDE Update (Generates .new.gz)
-  echo "Scanning file system... (this may take a minute)"
-  if sudo ionice -c3 nice -n 19 aide --update --config /etc/aide.conf >"$raw_log" 2>&1; then
-    aide_exit_code=$?
-  else
-    aide_exit_code=$?
+  local ref_date
+  ref_date=$(sudo date -r "$db_old" +"%Y-%m-%d %H:%M:%S" 2>/dev/null)
+
+  if [ -z "$ref_date" ]; then
+    echo -e "${RED}Error: Cannot read timestamp from '$db_old'. Does it exist? Check permissions.${END}"
+    if [ ! -f "$db_old" ]; then
+      read -p "AIDE database not found. Initialize a new one? [y/N]: " init_choice
+      if [[ "$init_choice" =~ ^[Yy]$ ]]; then
+        echo "Creating initial AIDE database..."
+        sudo aide --init --config /etc/aide.conf
+        sudo mv -f "$db_new" "$db_old"
+        echo "Database initialized. Please run the update script again to check for changes."
+      fi
+    fi
+    return 1
   fi
 
-  # AIDE returns non-zero if changes are found (which is expected during update)
+  # Run AIDE Update (which generates .new.gz and the report)
+  echo "Scanning file system... (this may take a minute)"
+  sudo ionice -c3 nice -n 19 aide --update --config /etc/aide.conf >"$raw_log" 2>&1
 
-  # 2. Filter the log
   echo "Filtering report based on recent pacman updates..."
-  # We pass the mtime of the OLD db to the filter script if needed,
-  # the filter script defaults to checking the DB file itself.
   if [ -f "/usr/local/bin/aide-filter" ]; then
-    cat "$raw_log" | /usr/local/bin/aide-filter >"$filtered_log"
+    cat "$raw_log" | /usr/local/bin/aide-filter "$ref_date" >"$filtered_log"
   else
     echo "Warning: aide-filter not found, showing raw log."
     cp "$raw_log" "$filtered_log"
   fi
 
-  # 3. Show the User the Filtered Report
-  echo -e "${GREEN}### AIDE INTEGRITY REPORT (Filtered) ###${END}"
-
-  # Check if filtered log is empty
+  echo -e "\n${GREEN}### AIDE INTEGRITY REPORT (Filtered) ###${END}"
   if [ ! -s "$filtered_log" ]; then
-    echo "No unexpected changes found (Filter matched everything)."
+    echo "No unexpected changes found (all changes were filtered)."
   else
     bat --style=plain --paging=always "$filtered_log"
   fi
 
-  # 4. Stop updating AIDE DB when there are abnormal changes
   echo -e "\n${RED}Review the changes above.${END}"
-  echo "If you see files you did not modify/update, answer N."
+  echo "If all changes are expected, you can update the database."
   read -p "Overwrite old database with new scan? [y/N]: " confirm
-
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    if [ -f "$db_new" ]; then
+    # CRITICAL: Check if the new DB exists before trying to move it
+    if sudo [ -f "$db_new" ]; then
       echo "Updating database..."
       sudo mv -f "$db_new" "$db_old"
-      # Copy the log to persistent storage for record keeping
       sudo cp "$filtered_log" "/var/log/aide/aide-$(date +%F).log"
       echo "Database updated successfully."
     else
-      echo "${RED}Error: New database not found!${END}"
+      echo -e "${RED}Error: New database ('$db_new') was not created by AIDE.${END}"
+      echo "This can happen if AIDE encountered a critical error. Check raw log:"
+      cat "$raw_log"
     fi
   else
-    echo "${RED}Database update ABORTED. keeping old snapshot.${END}"
-    if [ -f "$db_new" ]; then
+    echo -e "${RED}Database update ABORTED. Keeping old snapshot.${END}"
+    if sudo [ -f "$db_new" ]; then
       sudo rm "$db_new"
       echo "Discarded new database scan."
     fi
