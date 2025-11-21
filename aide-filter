@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Filter AIDE output to hide files owned by packages installed/upgraded
+# since a reference date (default: mtime of the AIDE DB).
+# Requires: pacman, awk, sed, sort, uniq, grep (or ripgrep if you prefer).
+
+DB=/var/lib/aide/aide.db.gz
+
+usage() {
+  echo "Usage: aide --check | $0 [\"YYYY-MM-DD HH:MM\"]"
+  exit 1
+}
+
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then usage; fi
+
+if [ -n "$1" ]; then
+  REF="$1"
+else
+  REF="$(date -r "$DB" +"%Y-%m-%d %H:%M")"
+fi
+
+# Get packages installed/upgraded since REF
+# pacman.log lines look like:
+# [YYYY-MM-DD HH:MM] [ALPM] upgraded <pkg> (old -> new)
+# [YYYY-MM-DD HH:MM] [ALPM] installed <pkg> (ver)
+PKGS=$(awk -v ref="$REF" '
+  match($0,/^\[([0-9-]{10} [0-9:]{5})\] \[ALPM\] (installed|upgraded) ([^ ]+)/,m) {
+    if (m[1] >= ref) print m[3];
+  }' /var/log/pacman.log | sort -u)
+
+# Build a list of file paths for those packages
+TMP=$(mktemp)
+for p in $PKGS; do
+  pacman -Qlq "$p" 2>/dev/null
+done | sort -u > "$TMP"
+
+# Filter AIDE output:
+# We drop lines that reference any of those file paths.
+# AIDE prints paths in lines containing " : /path" or "File: /path" or "Link: /path".
+# We match the path at end-of-line to avoid overmatching.
+awk -v list="$TMP" '
+  BEGIN {
+    while ((getline l < list) > 0) {
+      gsub(/[][^$.|()*+?{}\\]/,"\\&",l);  # escape regex
+      pats[l] = 1
+    }
+    close(list)
+  }
+  {
+    line=$0
+    path=""
+    if (match(line,/: (\/[^[:space:]]+)$/,m)) path=m[1];
+    else if (match(line,/File: (\/[^[:space:]]+)$/,m)) path=m[1];
+    else if (match(line,/Link: (\/[^[:space:]]+)$/,m)) path=m[1];
+
+    if (path != "" && pats[path]) next;
+    print line
+  }' -
+
+rm -f "$TMP"
+
